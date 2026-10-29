@@ -24,6 +24,12 @@ pub enum Error {
     #[error("Missing field in container: {0}")]
     MissingField(&'static str),
 
+    #[error("Invalid external certificate: {0}")]
+    Certificate(String),
+
+    #[error("External certificate does not match the container's private key")]
+    CertificateMismatch,
+
     #[error("Invalid password (public key check failed)")]
     InvalidPassword,
 

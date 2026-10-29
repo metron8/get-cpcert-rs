@@ -129,8 +129,8 @@ fn pfx_samples_extract_correctly() {
             failures.push(format!(
                 "[{name}] PEM mismatch:\n--- expected ---\n{}\n\
                  --- actual ---\n{}\n",
-                &expected.chars().take(300).collect::<String>(),
-                &actual.chars().take(300).collect::<String>(),
+                expected.chars().take(300).collect::<String>(),
+                actual.chars().take(300).collect::<String>(),
             ));
         } else {
             eprintln!("[{name}] OK ({} bytes)", actual.len());

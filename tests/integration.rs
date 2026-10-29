@@ -23,6 +23,9 @@ use std::path::{Path, PathBuf};
 
 use get_cpcert::extract;
 
+#[path = "integration/external_certificate.rs"]
+mod external_certificate;
+
 fn samples_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -125,8 +128,8 @@ fn samples_extract_correctly() {
             failures.push(format!(
                 "[{name}] PEM mismatch:\n--- expected (first 200 bytes) ---\n{}\n\
                  --- actual (first 200 bytes) ---\n{}\n",
-                &expected.chars().take(200).collect::<String>(),
-                &actual.chars().take(200).collect::<String>(),
+                expected.chars().take(200).collect::<String>(),
+                actual.chars().take(200).collect::<String>(),
             ));
         } else {
             eprintln!("[{name}] OK ({} bytes)", actual.len());

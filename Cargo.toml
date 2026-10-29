@@ -37,6 +37,7 @@ cipher = "=0.4.4"         # block-cipher trait used by rc2 + cbc
 
 # PEM output
 pem = "=3.0.4"
+x509-cert = { version = "=0.2.5", default-features = false, features = ["std"] }
 
 # Zeroize secrets
 zeroize = { version = "=1.8.1", features = ["derive"] }

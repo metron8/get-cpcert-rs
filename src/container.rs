@@ -95,10 +95,14 @@ fn read_file_either(dir: &Path, names: &[&str]) -> Result<Vec<u8>> {
 }
 
 pub fn load(dir: &Path) -> Result<Container> {
+    load_with_certificate(dir, None)
+}
+
+pub(super) fn load_with_certificate(dir: &Path, certificate: Option<&[u8]>) -> Result<Container> {
     let header_bytes = read_file(dir, "header.key")?;
     let primary_bytes = read_file_either(dir, &["primary.key", "primary2.key"])?;
     let masks_bytes = read_file_either(dir, &["masks.key", "masks2.key"])?;
-    from_bytes(&header_bytes, &primary_bytes, &masks_bytes)
+    from_bytes_with_certificate(&header_bytes, &primary_bytes, &masks_bytes, certificate)
 }
 
 /// Load a container directly from in-memory byte buffers — no filesystem
@@ -108,6 +112,15 @@ pub fn from_bytes(
     primary_bytes: &[u8],
     masks_bytes: &[u8],
 ) -> Result<Container> {
+    from_bytes_with_certificate(header_bytes, primary_bytes, masks_bytes, None)
+}
+
+fn from_bytes_with_certificate(
+    header_bytes: &[u8],
+    primary_bytes: &[u8],
+    masks_bytes: &[u8],
+    certificate: Option<&[u8]>,
+) -> Result<Container> {
     let header =
         asn1::parse(header_bytes).map_err(|e| Error::Container(format!("header.key: {e}")))?;
     let primary =
@@ -115,7 +128,7 @@ pub fn from_bytes(
     let masks =
         asn1::parse(masks_bytes).map_err(|e| Error::Container(format!("masks.key: {e}")))?;
 
-    let (algorithm, pub8, cert_der) = parse_header(&header)?;
+    let (algorithm, pub8, cert_der) = parse_header(&header, certificate)?;
     let primary_enc =
         first_octet_string(&primary).ok_or(Error::MissingField("primary.key: encrypted key"))?;
     let (mask, salt_vec) = parse_masks(&masks)?;
@@ -154,7 +167,7 @@ pub fn from_bytes(
 }
 
 /// Find algorithm OID + pub8 + cert blob inside header.key.
-fn parse_header(root: &Node) -> Result<(Algorithm, [u8; 8], Vec<u8>)> {
+fn parse_header(root: &Node, certificate: Option<&[u8]>) -> Result<(Algorithm, [u8; 8], Vec<u8>)> {
     // Algorithm: any OID anywhere in the tree that matches one of the three we know.
     let mut all_oids = Vec::new();
     root.collect_oids(&mut all_oids);
@@ -172,7 +185,7 @@ fn parse_header(root: &Node) -> Result<(Algorithm, [u8; 8], Vec<u8>)> {
     let mut ctx = Vec::new();
     root.collect_context(&[], &mut ctx);
     let mut pub8: Option<[u8; 8]> = None;
-    let mut cert: Option<Vec<u8>> = None;
+    let mut cert = certificate.map(<[u8]>::to_vec);
     for (_path, node) in ctx {
         if node.class == TagClass::ContextSpecific {
             if node.tag == 10 && pub8.is_none() && node.content.len() >= 8 {

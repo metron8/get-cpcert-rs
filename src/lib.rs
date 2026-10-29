@@ -7,9 +7,10 @@ use std::path::Path;
 
 use num_bigint_dig::{BigUint, ModInverse};
 use num_traits::ToPrimitive;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 pub mod asn1;
+mod certificate;
 pub mod container;
 pub mod error;
 pub mod gost28147;
@@ -35,13 +36,30 @@ pub fn extract(dir: &Path, password: &str) -> Result<String> {
 }
 
 pub fn extract_from_container(container: &Container, password: &str) -> Result<String> {
+    extract_checked(container, password, None)
+}
+
+/// Extract a PEM bundle using one external X.509 certificate (DER or PEM).
+/// The certificate must match the recovered key and a supported GOST curve.
+/// This does not validate the certificate's trust chain or validity period.
+pub fn extract_with_certificate(dir: &Path, password: &str, certificate: &[u8]) -> Result<String> {
+    let certificate = certificate::Certificate::parse(certificate)?;
+    let container = container::load_with_certificate(dir, Some(certificate.der()))?;
+    extract_checked(&container, password, Some(&certificate))
+}
+
+fn extract_checked(
+    container: &Container,
+    password: &str,
+    certificate: Option<&certificate::Certificate>,
+) -> Result<String> {
     // 1. Derive the symmetric key from the password.
-    let mut pwd_key = match container.algorithm {
+    let mut pwd_key = Zeroizing::new(match container.algorithm {
         Algorithm::Gost2001 => kdf::derive_2001(&container.salt, password),
         Algorithm::Gost2012_256 | Algorithm::Gost2012_512 => {
             kdf::derive_2012(&container.salt, password)
         }
-    };
+    });
 
     // 2. Choose 28147-89 S-box per algorithm.
     let sbox = match container.algorithm {
@@ -79,11 +97,11 @@ pub fn extract_from_container(container: &Container, password: &str) -> Result<S
 
     // 6. Compute Q = d·G and check first 8 bytes of X against pub8.
     let q_point = Point::base(&curve).scalar_mul(&raw_secret, &curve);
-    let q_x = match q_point {
+    let q_x = match &q_point {
         Point::Affine { x, .. } => x,
         Point::Infinity => return Err(Error::InvalidPassword),
     };
-    let x_be = gost_ec::to_be_bytes_padded(&q_x, curve.coord_bytes);
+    let x_be = gost_ec::to_be_bytes_padded(q_x, curve.coord_bytes);
     let mut x_le: Vec<u8> = x_be.into_iter().rev().collect();
     let matches = x_le[..8] == container.pub8;
     x_le.zeroize();
@@ -91,6 +109,10 @@ pub fn extract_from_container(container: &Container, password: &str) -> Result<S
         // Wipe and bail.
         pwd_key.zeroize();
         return Err(Error::InvalidPassword);
+    }
+
+    if let Some(certificate) = certificate {
+        certificate.verify_key(container.algorithm, &q_point)?;
     }
 
     // 7. Format the private key bytes as the templates expect:

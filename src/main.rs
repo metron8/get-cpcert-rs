@@ -44,6 +44,11 @@ struct Cli {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
+    /// External X.509 certificate (DER or PEM), overriding the container's
+    /// embedded certificate. Only valid for a container directory.
+    #[arg(long, value_name = "FILE", conflicts_with = "inspect")]
+    cert: Option<PathBuf>,
+
     /// Diagnostic mode: print a structural report of the .pfx file
     /// (OIDs, PBE schemes, salt/iter, bag types, MAC) and exit.
     /// Does NOT decrypt anything and does not require a password.
@@ -59,6 +64,19 @@ fn main() -> ExitCode {
         return run_inspect(&cli.container);
     }
 
+    if cli.cert.is_some() && !cli.container.is_dir() {
+        eprintln!("error: --cert only works with a container directory");
+        return ExitCode::from(2);
+    }
+
+    let certificate = match cli.cert.as_ref().map(std::fs::read).transpose() {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("error reading --cert file: {e}");
+            return ExitCode::from(3);
+        }
+    };
+
     let password = match resolve_password(&cli) {
         Ok(p) => p,
         Err(e) => {
@@ -68,7 +86,10 @@ fn main() -> ExitCode {
     };
 
     let result = if cli.container.is_dir() {
-        get_cpcert::extract(&cli.container, &password)
+        match certificate {
+            Some(bytes) => get_cpcert::extract_with_certificate(&cli.container, &password, &bytes),
+            None => get_cpcert::extract(&cli.container, &password),
+        }
     } else if cli.container.is_file() {
         match std::fs::read(&cli.container) {
             Ok(bytes) => get_cpcert::extract_from_pfx(&bytes, &password),
